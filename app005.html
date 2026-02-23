@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Ropes Course Manager Pro</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        apple: {
+                            base: '#000000',      
+                            surface: '#1C1C1E',   
+                            border: '#38383A',    
+                            blue: '#0A84FF',      
+                            green: '#32D74B',     
+                            orange: '#FF9F0A',    
+                            red: '#FF453A',       
+                            purple: '#BF5AF2',    
+                            mint: '#66D4CF',      
+                            gray: '#98989D'       
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Text"', '"Segoe UI"', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        :root { color-scheme: dark; }
+        
+        body { 
+            -webkit-font-smoothing: antialiased; 
+            overscroll-behavior-y: none; 
+            background-color: #000000;
+            color: #ffffff;
+        }
+        
+        .app-container { background-color: #000000; }
+
+        ::-webkit-scrollbar { width: 0px; background: transparent; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+
+        .ios-btn:active { opacity: 0.6; transform: scale(0.98); transition: all 0.1s; }
+        .ios-active:active { background-color: #2C2C2E !important; transition: background-color 0s; }
+        
+        select { -webkit-appearance: none; appearance: none; background: transparent; }
+        input[type="range"] { accent-color: #0A84FF; }
+        input[type="datetime-local"]::-webkit-calendar-picker-indicator { filter: invert(1); cursor: pointer; opacity: 0.6; }
+        
+        @keyframes slideUp {
+            from { transform: translateY(100%); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .animate-slide-up { animation: slideUp 0.35s cubic-bezier(0.32, 0.72, 0, 1) forwards; }
+
+        .map-grid {
+            background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.15) 1px, transparent 0);
+            background-size: 24px 24px;
+        }
+    </style>
+</head>
+<body class="h-[100dvh] w-screen overflow-hidden flex selection:bg-apple-blue/30">
+    
+    <div id="root" class="h-full w-full flex app-container"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // MARK: - Constants & Mappings
+        const AVAILABLE_ICONS = [
+            { id: "figure.climbing", icon: "ph-person-simple-climb" }, { id: "figure.stairs", icon: "ph-steps" },
+            { id: "mountain.2.fill", icon: "ph-mountains" }, { id: "figure.fall", icon: "ph-parachute" },
+            { id: "leaf.fill", icon: "ph-leaf" }, { id: "map.fill", icon: "ph-map-trifold" },
+            { id: "flag.fill", icon: "ph-flag-banner" }, { id: "star.fill", icon: "ph-star" },
+            { id: "shield.fill", icon: "ph-shield-check" }, { id: "bolt.fill", icon: "ph-lightning" },
+            { id: "house.fill", icon: "ph-house" }, { id: "storefront", icon: "ph-storefront" }, 
+            { id: "wrench.fill", icon: "ph-wrench" }, { id: "coffee", icon: "ph-coffee" },
+            { id: "tent.fill", icon: "ph-tent" }
+        ];
+
+        const AVAILABLE_COLORS = [
+            { name: "Red", class: "text-apple-red", bg: "bg-apple-red" }, { name: "Orange", class: "text-apple-orange", bg: "bg-apple-orange" },
+            { name: "Green", class: "text-apple-green", bg: "bg-apple-green" }, { name: "Blue", class: "text-apple-blue", bg: "bg-apple-blue" },
+            { name: "Purple", class: "text-apple-purple", bg: "bg-apple-purple" }, { name: "Mint", class: "text-apple-mint", bg: "bg-apple-mint" },
+            { name: "Gray", class: "text-gray-400", bg: "bg-gray-500" }
+        ];
+
+        const GROUP_TYPES = ["School", "Camp", "Corporate", "Public", "Birthday", "Other"];
+        const STAFF_ROLES = ["Manager", "Lead Guide", "Guide", "Trainee", "Floater", "Maintenance"];
+
+        const generateUUID = () => crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
+        const getIconClass = (id) => AVAILABLE_ICONS.find(i => i.id === id)?.icon || "ph-flag-banner";
+        const getColorClass = (name) => AVAILABLE_COLORS.find(c => c.name === name)?.class || "text-apple-blue";
+        const toLocalISO = (date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+        const formatTime = (isoString) => new Date(isoString).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+        // MARK: - Reusable Dark UI Components
+        const Sheet = ({ title, onClose, onSave, saveDisabled, children, isDestructive, destructiveText, onDestructive }) => (
+            <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center sm:p-4">
+                <div className="absolute inset-0 bg-black/70 backdrop-blur-md transition-opacity" onClick={onClose}></div>
+                <div className="bg-[#1C1C1E] w-full md:max-w-lg md:rounded-2xl rounded-t-2xl shadow-2xl shadow-black/80 flex flex-col max-h-[92vh] md:max-h-[85vh] relative z-10 overflow-hidden animate-slide-up border border-white/10">
+                    <div className="flex justify-between items-center px-4 h-[56px] bg-[#1C1C1E]/85 backdrop-blur-xl border-b border-apple-border sticky top-0 shrink-0 z-20">
+                        <button onClick={onClose} className="text-apple-blue text-[17px] font-medium ios-btn w-20 text-left">Cancel</button>
+                        <h2 className="font-semibold text-[17px] text-white text-center flex-1 tracking-tight">{title}</h2>
+                        <div className="w-20 text-right">
+                            {onSave && <button onClick={onSave} disabled={saveDisabled} className={`text-[17px] font-semibold ios-btn ${saveDisabled ? 'text-gray-600' : 'text-apple-blue'}`}>Save</button>}
+                        </div>
+                    </div>
+                    <div className="p-4 md:p-6 overflow-y-auto hide-scrollbar flex-1 pb-12">
+                        {children}
+                        {isDestructive && (
+                            <button onClick={() => { if(window.confirm(`Are you sure you want to ${destructiveText.toLowerCase()}?`)) onDestructive(); }} className="w-full mt-6 py-3.5 bg-apple-red/10 text-apple-red font-semibold text-[17px] rounded-xl shadow-md border border-apple-red/20 ios-active transition-colors flex items-center justify-center gap-2">
+                                <i className="ph-trash ph-bold text-[20px]"></i> {destructiveText}
+                            </button>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+
+        const Section = ({ title, children, footer }) => (
+            <div className="mb-8 w-full">
+                {title && <h2 className="text-[13px] font-medium text-apple-gray uppercase tracking-wide ml-4 mb-2">{title}</h2>}
+                <div className="bg-apple-surface rounded-xl shadow-md border border-white/5 overflow-hidden divide-y divide-white/5">
+                    {children}
+                </div>
+                {footer && <p className="text-[13px] text-apple-gray mt-2 ml-4 mr-4 leading-snug">{footer}</p>}
+            </div>
+        );
+
+        const ListRow = ({ children, onClick, hasChevron = false }) => (
+            <div onClick={onClick} className={`px-4 py-3 flex justify-between items-center bg-apple-surface ${onClick ? 'cursor-pointer ios-active hover:bg-[#252527] transition-colors' : ''}`}>
+                <div className="flex-1 flex justify-between items-center pr-2">{children}</div>
+                {hasChevron && <i className="ph-bold ph-caret-right text-gray-500 text-lg ml-2"></i>}
+            </div>
+        );
+
+        const FormRow = ({ label, children }) => (
+            <div className="px-4 py-3 flex justify-between items-center bg-apple-surface">
+                <label className="text-[17px] text-white w-1/3 whitespace-nowrap">{label}</label>
+                <div className="flex-1 flex justify-end">{children}</div>
+            </div>
+        );
+
+        const Toggle = ({ label, checked, onChange, description }) => (
+            <div className="px-4 py-3.5 bg-apple-surface flex flex-col justify-center border-t border-white/5">
+                <div className="flex justify-between items-center">
+                    <span className="text-[17px] text-white">{label}</span>
+                    <button type="button" onClick={() => onChange(!checked)} className={`w-[50px] h-[30px] rounded-full transition-colors relative shadow-inner outline-none ${checked ? 'bg-apple-green' : 'bg-gray-600'}`}>
+                        <div className={`w-6 h-6 bg-white rounded-full absolute top-[3px] transition-transform shadow-sm ${checked ? 'translate-x-[23px]' : 'translate-x-[3px]'}`}></div>
+                    </button>
+                </div>
+                {description && <p className="text-[13px] text-gray-400 mt-1.5 leading-snug">{description}</p>}
+            </div>
+        );
+
+        // MARK: - Main Application Controller
+        const App = () => {
+            const [activeTab, setActiveTab] = useState('Dashboard');
+            const [isLoaded, setIsLoaded] = useState(false);
+            const [isFullscreen, setIsFullscreen] = useState(false);
+            
+            const [saveStatus, setSaveStatus] = useState('');
+
+            const [elements, setElements] = useState([]);
+            const [staff, setStaff] = useState([]);
+            const [groups, setGroups] = useState([]);
+            const [sessions, setSessions] = useState([]);
+            const fileInputRef = useRef(null);
+
+            // LOAD DATA
+            useEffect(() => {
+                const data = localStorage.getItem('RopesCourseAppData');
+                if (data) {
+                    try {
+                        const parsed = JSON.parse(data);
+                        // Backwards compatibility patch for older data saves
+                        const patchedElements = (parsed.elements || []).map(e => ({ ...e, includeInRotation: e.includeInRotation !== false }));
+                        setElements(patchedElements); 
+                        setStaff(parsed.staff || []);
+                        setGroups(parsed.groups || []); 
+                        setSessions(parsed.sessions || []);
+                    } catch(e) { loadStarterData(); }
+                } else {
+                    loadStarterData();
+                }
+                setIsLoaded(true);
+
+                const handleFullscreenChange = () => setIsFullscreen(!!document.fullscreenElement);
+                document.addEventListener('fullscreenchange', handleFullscreenChange);
+                return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+            }, []);
+
+            // AUTO-SAVE ENGINE
+            useEffect(() => {
+                if (!isLoaded) return;
+                
+                setSaveStatus('Saving...');
+                const timer = setTimeout(() => {
+                    localStorage.setItem('RopesCourseAppData', JSON.stringify({ elements, staff, groups, sessions }));
+                    setSaveStatus('Saved ✓');
+                    setTimeout(() => setSaveStatus(''), 2000);
+                }, 600);
+                
+                return () => clearTimeout(timer);
+            }, [elements, staff, groups, sessions, isLoaded]);
+
+            useEffect(() => {
+                if (!isLoaded) return;
+                const handleUnload = () => localStorage.setItem('RopesCourseAppData', JSON.stringify({ elements, staff, groups, sessions }));
+                window.addEventListener('beforeunload', handleUnload);
+                return () => window.removeEventListener('beforeunload', handleUnload);
+            }, [elements, staff, groups, sessions, isLoaded]);
+
+            const exportData = () => {
+                const dataStr = JSON.stringify({ elements, staff, groups, sessions }, null, 2);
+                const blob = new Blob([dataStr], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a'); a.href = url;
+                a.download = `RopesManager_Backup_${new Date().toISOString().split('T')[0]}.json`;
+                document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+            };
+
+            const importData = (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const parsed = JSON.parse(e.target.result);
+                        if (parsed.elements && parsed.staff) {
+                            setElements(parsed.elements); setStaff(parsed.staff);
+                            setGroups(parsed.groups || []); setSessions(parsed.sessions || []);
+                            alert("✅ Backup Restored Successfully!");
+                        } else { alert("❌ Invalid backup file format."); }
+                    } catch (err) { alert("❌ Error reading file. Make sure it is a valid JSON backup."); }
+                };
+                reader.readAsText(file);
+                event.target.value = ''; 
+            };
+
+            const loadStarterData = () => {
+                const zipId = generateUUID(), ropesId = generateUUID(), wallId = generateUUID(), frontDeskId = generateUUID(), lunchId = generateUUID();
+                
+                const initElements = [
+                    { id: zipId, name: "Canopy Zip Line", capacity: 15, icon: "figure.climbing", colorHex: "Blue", mapX: 0.8, mapY: 0.2, includeInRotation: true },
+                    { id: ropesId, name: "High Ropes", capacity: 20, icon: "figure.stairs", colorHex: "Orange", mapX: 0.5, mapY: 0.5, includeInRotation: true },
+                    { id: wallId, name: "Rock Wall", capacity: 8, icon: "mountain.2.fill", colorHex: "Red", mapX: 0.2, mapY: 0.7, includeInRotation: true },
+                    
+                    // Non-Rotational Utility Stations!
+                    { id: frontDeskId, name: "Basecamp Front Desk", capacity: 99, icon: "tent.fill", colorHex: "Mint", mapX: 0.1, mapY: 0.1, includeInRotation: false },
+                    { id: lunchId, name: "Lunch Pavilion", capacity: 100, icon: "coffee", colorHex: "Gray", mapX: 0.5, mapY: 0.85, includeInRotation: false }
+                ];
+                setElements(initElements);
+                
+                setStaff([
+                    { id: generateUUID(), name: "Alice M.", role: "Manager", assignedElementId: frontDeskId },
+                    { id: generateUUID(), name: "Bob S.", role: "Lead Guide", assignedElementId: zipId },
+                    { id: generateUUID(), name: "Charlie D.", role: "Guide", assignedElementId: ropesId },
+                    { id: generateUUID(), name: "Diana P.", role: "Maintenance", assignedElementId: lunchId }
+                ]);
+                
+                const initGroups = [
+                    { id: generateUUID(), name: "Springfield High", type: "School", size: 14 },
+                    { id: generateUUID(), name: "Camp Timber", type: "Camp", size: 25 },
+                    { id: generateUUID(), name: "TechCorp Retreat", type: "Corporate", size: 6 }
+                ];
+                setGroups(initGroups);
+                
+                let start = new Date(); start.setHours(9, 0, 0, 0);
+                
+                // Add a sample Custom Lunch Break event
+                let lunchStart = new Date(start.getTime() + (90 * 60000)); 
+                let lunchEnd = new Date(lunchStart.getTime() + (45 * 60000)); 
+                let sampleSessions = [
+                    { id: generateUUID(), isCustom: true, customTitle: "All Camp Lunch Break", groupId: "", startTime: lunchStart.toISOString(), endTime: lunchEnd.toISOString() }
+                ];
+                setSessions(sampleSessions);
+                
+                generateSchedule(start.toISOString(), 45, 10, initElements, initGroups, sampleSessions);
+            };
+
+            const generateSchedule = (startTimeIso, blockMins, bufferMins, els = elements, grps = groups, preserveSessions = sessions) => {
+                // Filter elements so groups ONLY rotate through elements marked as "includeInRotation"
+                const rotationEls = els.filter(e => e.includeInRotation !== false);
+                if (!rotationEls.length || !grps.length) {
+                    alert("⚠️ You must have at least one active Rotation Station and one Group to auto-generate.");
+                    return;
+                }
+                
+                // Keep Custom Events (like Lunch), but completely clear the old auto-generated rotation Activities
+                let newSessions = preserveSessions.filter(s => s.isCustom);
+                let currentTime = new Date(startTimeIso).getTime();
+
+                for (let rotation = 0; rotation < rotationEls.length; rotation++) {
+                    let endTime = currentTime + (blockMins * 60000);
+                    grps.forEach((group, gIndex) => {
+                        let elIndex = (gIndex + rotation) % rotationEls.length;
+                        newSessions.push({
+                            id: generateUUID(), elementId: rotationEls[elIndex].id, groupId: group.id, isCustom: false,
+                            startTime: new Date(currentTime).toISOString(), endTime: new Date(endTime).toISOString()
+                        });
+                    });
+                    currentTime = endTime + (bufferMins * 60000);
+                }
+                newSessions.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+                setSessions(newSessions);
+            };
+
+            const factoryReset = () => {
+                if (window.confirm("ERASE ALL DATA?\n\nAre you sure you want to delete all elements, staff, groups, and sessions? This cannot be undone.")) {
+                    localStorage.removeItem('RopesCourseAppData'); loadStarterData();
+                }
+            };
+
+            const toggleFullScreen = () => {
+                if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(err => console.error(err));
+                else if (document.exitFullscreen) document.exitFullscreen();
+            };
+
+            if (!isLoaded) return <div className="flex h-full w-full items-center justify-center text-apple-gray font-medium">Loading Workspace...</div>;
+
+            const ctx = { elements, setElements, staff, setStaff, groups, setGroups, sessions, setSessions, generateSchedule, factoryReset, exportData, importData };
+
+            const TABS = [
+                { name: 'Dashboard', icon: 'ph-squares-four' },
+                { name: 'Schedule', icon: 'ph-calendar-blank' },
+                { name: 'Stations', icon: 'ph-map-trifold' },
+                { name: 'Employees', icon: 'ph-identification-card' },
+                { name: 'Groups', icon: 'ph-users-three' }
+            ];
+
+            return (
+                <div className="flex h-full w-full flex-col md:flex-row relative">
+                    <input type="file" accept=".json" ref={fileInputRef} onChange={importData} className="hidden" />
+
+                    {/* Sidebar */}
+                    <nav className="hidden md:flex flex-col w-[260px] border-r border-white/5 bg-[#0A0A0A] z-30 shrink-0">
+                        <div className="p-6 pt-10 pb-6 flex justify-between items-center">
+                            <h1 className="text-[20px] font-bold tracking-tight text-white flex items-center gap-2">
+                                <i className="ph-fill ph-mountains text-apple-blue drop-shadow-md"></i> Manager
+                            </h1>
+                        </div>
+                        <div className="flex-1 px-3 space-y-1.5">
+                            {TABS.map(tab => (
+                                <button key={tab.name} onClick={() => setActiveTab(tab.name)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-[15px] ${activeTab === tab.name ? 'bg-apple-blue/15 text-apple-blue font-semibold border border-apple-blue/20' : 'text-gray-400 hover:bg-white/5 font-medium border border-transparent'}`}>
+                                    <i className={`${tab.icon} ${activeTab === tab.name ? 'ph-fill' : ''} text-[22px] w-6`}></i>
+                                    {tab.name}
+                                </button>
+                            ))}
+                        </div>
+                    </nav>
+
+                    {/* Main Content */}
+                    <main className="flex-1 flex flex-col h-full overflow-hidden relative bg-apple-base">
+                        <header className="px-4 py-2 border-b border-white/5 bg-apple-base/70 backdrop-blur-xl flex-shrink-0 z-20 sticky top-0 flex justify-between items-center h-[56px]">
+                            <div className="w-24 text-left">
+                                <span className={`text-[12px] font-bold uppercase tracking-wider transition-opacity duration-300 ${saveStatus === 'Saved ✓' ? 'text-apple-green' : 'text-gray-500'}`}>{saveStatus}</span>
+                            </div>
+                            <h1 className="text-[17px] font-semibold text-white tracking-tight">{activeTab === 'Dashboard' ? 'Command Center' : activeTab}</h1>
+                            <div className="w-24 text-right">
+                                <button onClick={toggleFullScreen} className="text-gray-400 hover:text-white transition-colors text-[22px] ios-btn outline-none hidden md:inline-block"><i className={isFullscreen ? 'ph-corners-in' : 'ph-corners-out'}></i></button>
+                            </div>
+                        </header>
+
+                        <div className="flex-1 overflow-y-auto hide-scrollbar pb-24 md:pb-8">
+                            <div className="max-w-4xl mx-auto w-full p-4 md:p-8">
+                                <h1 className="text-[34px] font-bold px-2 pb-8 hidden md:block tracking-tight text-white">{activeTab === 'Dashboard' ? 'Command Center' : activeTab}</h1>
+                                
+                                {activeTab === 'Dashboard' && <DashboardView ctx={ctx} triggerImport={() => fileInputRef.current?.click()} />}
+                                {activeTab === 'Schedule' && <ScheduleView ctx={ctx} />}
+                                {activeTab === 'Stations' && <ElementsView ctx={ctx} />}
+                                {activeTab === 'Employees' && <StaffView ctx={ctx} />}
+                                {activeTab === 'Groups' && <GroupsView ctx={ctx} />}
+                            </div>
+                        </div>
+                    </main>
+
+                    {/* Mobile Tab Bar */}
+                    <nav className="md:hidden absolute bottom-0 w-full bg-[#1C1C1E]/85 backdrop-blur-2xl border-t border-white/5 flex justify-around px-2 pt-2 pb-8 z-30">
+                        {TABS.map(tab => (
+                            <button key={tab.name} onClick={() => setActiveTab(tab.name)} className={`flex flex-col items-center gap-1 w-16 ios-btn ${activeTab === tab.name ? 'text-apple-blue' : 'text-gray-500'}`}>
+                                <i className={`${tab.icon} ${activeTab === tab.name ? 'ph-fill' : ''} text-[26px]`}></i>
+                                <span className="text-[10px] font-medium tracking-wide">{tab.name}</span>
+                            </button>
+                        ))}
+                    </nav>
+                </div>
+            );
+        };
+
+        // MARK: - 1. Dashboard Tab
+        const DashboardView = ({ ctx, triggerImport }) => {
+            const [now, setNow] = useState(new Date());
+
+            useEffect(() => {
+                const interval = setInterval(() => setNow(new Date()), 10000);
+                return () => clearInterval(interval);
+            }, []);
+
+            const activeSessions = ctx.sessions.filter(s => new Date(s.startTime) <= now && new Date(s.endTime) >= now);
+
+            return (
+                <div className="space-y-8">
+                    <div className="grid grid-cols-3 gap-3 md:gap-6">
+                        {[
+                            { title: "Staff", count: ctx.staff.length, icon: "ph-identification-card", color: "text-apple-blue", border: "bg-apple-blue" },
+                            { title: "Groups", count: ctx.groups.length, icon: "ph-users-three", color: "text-apple-green", border: "bg-apple-green" },
+                            { title: "Stations", count: ctx.elements.length, icon: "ph-flag-banner", color: "text-apple-orange", border: "bg-apple-orange" }
+                        ].map(s => (
+                            <div key={s.title} className="bg-apple-surface p-4 rounded-[16px] shadow-lg border border-white/5 flex flex-col items-center justify-center md:py-8 relative overflow-hidden">
+                                <div className={`absolute top-0 left-0 w-full h-1 ${s.border} opacity-80`}></div>
+                                <div className={`w-12 h-12 rounded-full bg-white/5 flex items-center justify-center mb-3`}><i className={`${s.icon} ${s.color} ph-fill text-[24px]`}></i></div>
+                                <span className="text-[28px] font-bold tracking-tight text-white leading-none">{s.count}</span>
+                                <span className="text-[12px] text-gray-400 font-semibold uppercase tracking-widest mt-2">{s.title}</span>
+                            </div>
+                        ))}
+                    </div>
+
+                    <Section title="Happening Now">
+                        {activeSessions.length === 0 ? (
+                            <div className="p-6 text-[15px] text-gray-500 text-center font-medium">No active sessions at the moment.</div>
+                        ) : activeSessions.map(s => <SessionRow key={s.id} session={s} ctx={ctx} />)}
+                    </Section>
+
+                    <Section title="Station Assignments">
+                        {ctx.elements.map(el => {
+                            const assigned = ctx.staff.filter(s => s.assignedElementId === el.id);
+                            return (
+                                <ListRow key={el.id}>
+                                    <div className="flex items-center gap-4 py-1.5 w-full pr-2">
+                                        <i className={`${getIconClass(el.icon)} ph-fill ${getColorClass(el.colorHex)} text-[28px] w-6 text-center drop-shadow-md`}></i>
+                                        <div className="flex-1 truncate">
+                                            <div className="flex items-center gap-2">
+                                                <h3 className="font-medium text-[17px] text-white tracking-tight">{el.name}</h3>
+                                                {el.includeInRotation === false && <span className="text-[9px] font-bold uppercase tracking-wider bg-white/10 text-gray-300 px-1.5 py-0.5 rounded-md border border-white/5">Utility</span>}
+                                            </div>
+                                            {assigned.length === 0 
+                                                ? <p className="text-[13px] text-apple-red font-medium mt-0.5">No Staff Assigned</p> 
+                                                : <p className="text-[13px] text-gray-400 mt-0.5 truncate">Staff: <span className="text-gray-300">{assigned.map(s => s.name).join(', ')}</span></p>}
+                                        </div>
+                                    </div>
+                                    {el.includeInRotation !== false && <div className="text-[13px] font-medium text-gray-300 bg-[#2C2C2E] px-3 py-1.5 rounded-full border border-white/5 whitespace-nowrap">Cap: <span className="text-white">{el.capacity}</span></div>}
+                                </ListRow>
+                            );
+                        })}
+                    </Section>
+
+                    <Section title="Data Management" footer="Backing up your data lets you safely move your roster to another computer or browser.">
+                        <ListRow onClick={ctx.exportData} hasChevron={false}>
+                            <div className="flex items-center gap-3 text-apple-blue font-medium py-1.5">
+                                <div className="w-8 h-8 rounded-full bg-apple-blue/10 flex items-center justify-center"><i className="ph-download-simple ph-bold text-[18px]"></i></div>
+                                Backup Data (Download)
+                            </div>
+                        </ListRow>
+                        <ListRow onClick={triggerImport} hasChevron={false}>
+                            <div className="flex items-center gap-3 text-apple-orange font-medium py-1.5">
+                                <div className="w-8 h-8 rounded-full bg-apple-orange/10 flex items-center justify-center"><i className="ph-upload-simple ph-bold text-[18px]"></i></div>
+                                Restore Data (Import)
+                            </div>
+                        </ListRow>
+                    </Section>
+
+                    <Section footer="This will delete all saved changes and restore the starter template.">
+                        <button onClick={ctx.factoryReset} className="w-full py-3.5 text-apple-red text-[17px] font-medium text-center bg-apple-surface ios-active block transition-colors flex justify-center items-center gap-2">
+                            <i className="ph-warning-fill"></i> Factory Reset All Data
+                        </button>
+                    </Section>
+                </div>
+            );
+        };
+
+        const SessionRow = ({ session, ctx, onClick }) => {
+            // CUSTOM EVENT RENDERING
+            if (session.isCustom) {
+                const group = ctx.groups.find(g => g.id === session.groupId);
+                return (
+                    <ListRow onClick={onClick} hasChevron={!!onClick}>
+                        <div className="py-1 flex-1">
+                            <h4 className="font-medium text-[17px] text-apple-orange tracking-tight flex items-center gap-2">
+                                <i className="ph-fill ph-clock drop-shadow-md text-[20px]"></i> {session.customTitle || 'Custom Event'}
+                            </h4>
+                            <div className="mt-1 text-[13px] text-gray-400 font-medium">
+                                {group ? group.name : 'Facility Wide Event'}
+                            </div>
+                        </div>
+                        <div className="text-right pl-4">
+                            <div className="text-[15px] text-gray-100 font-medium">{formatTime(session.startTime)} - {formatTime(session.endTime)}</div>
+                            <div className="text-[12px] mt-0.5 text-apple-orange/80 font-medium">Custom Block</div>
+                        </div>
+                    </ListRow>
+                );
+            }
+
+            // STANDARD ACTIVITY RENDERING
+            const group = ctx.groups.find(g => g.id === session.groupId);
+            const el = ctx.elements.find(e => e.id === session.elementId);
+            if (!group || !el) return null;
+            const overCap = group.size > el.capacity;
+
+            return (
+                <ListRow onClick={onClick} hasChevron={!!onClick}>
+                    <div className="py-1 flex-1 pr-2">
+                        <h4 className="font-medium text-[17px] text-white tracking-tight">{group.name}</h4>
+                        <div className="flex items-center gap-1.5 mt-1 text-[13px] text-gray-400 font-medium truncate">
+                            <i className={`${getIconClass(el.icon)} ph-fill ${getColorClass(el.colorHex)}`}></i><span className="truncate">{el.name}</span>
+                        </div>
+                    </div>
+                    <div className="text-right">
+                        <div className="text-[15px] text-gray-100 font-medium">{formatTime(session.startTime)} - {formatTime(session.endTime)}</div>
+                        <div className={`text-[12px] mt-0.5 ${overCap ? 'text-apple-red font-semibold' : 'text-gray-500 font-medium'}`}>
+                            <span className="text-gray-300">{group.size}</span>/{el.capacity} {overCap ? '(Over)' : 'ppl'}
+                        </div>
+                    </div>
+                </ListRow>
+            );
+        };
+
+        // MARK: - 2. Schedule Tab
+        const ScheduleView = ({ ctx }) => {
+            const [showGen, setShowGen] = useState(false);
+            const [editingSession, setEditingSession] = useState(null);
+
+            const saveSession = (s) => {
+                if (s.isNew) { delete s.isNew; ctx.setSessions([...ctx.sessions, s].sort((a, b) => new Date(a.startTime) - new Date(b.startTime))); } 
+                else { ctx.setSessions(ctx.sessions.map(x => x.id === s.id ? s : x).sort((a, b) => new Date(a.startTime) - new Date(b.startTime))); }
+                setEditingSession(null);
+            };
+
+            const addNew = () => {
+                const firstEl = ctx.elements.find(e => e.includeInRotation !== false) || ctx.elements[0];
+                setEditingSession({ id: generateUUID(), isCustom: false, elementId: firstEl?.id || '', groupId: ctx.groups[0]?.id || '', startTime: new Date().toISOString(), endTime: new Date(Date.now() + 3600000).toISOString(), isNew: true });
+            };
+
+            return (
+                <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-3 mb-6">
+                        <button onClick={addNew} className="w-full py-3.5 bg-apple-blue/15 text-apple-blue font-semibold rounded-xl border border-apple-blue/20 flex items-center justify-center gap-2 ios-active hover:bg-apple-blue/25 transition-all">
+                            <i className="ph ph-plus font-bold text-lg"></i> Add Block
+                        </button>
+                        <button onClick={() => setShowGen(true)} className="w-full py-3.5 bg-white/10 text-white font-semibold rounded-xl border border-white/10 flex items-center justify-center gap-2 ios-active hover:bg-white/20 transition-all">
+                            <i className="ph ph-magic-wand font-bold text-lg"></i> Auto-Generate
+                        </button>
+                    </div>
+
+                    <Section>
+                        {ctx.sessions.length === 0 ? <div className="p-6 text-[15px] text-gray-500 text-center font-medium">No schedule generated yet.</div> 
+                         : ctx.sessions.map(s => <SessionRow key={s.id} session={s} ctx={ctx} onClick={() => setEditingSession({...s})} />)}
+                    </Section>
+
+                    {showGen && <ScheduleGeneratorSheet ctx={ctx} onClose={() => setShowGen(false)} />}
+                    {editingSession && <EditSessionSheet session={editingSession} ctx={ctx} onClose={() => setEditingSession(null)} onSave={saveSession} onDelete={(id) => { ctx.setSessions(ctx.sessions.filter(x => x.id !== id)); setEditingSession(null); }} />}
+                </div>
+            );
+        };
+
+        const ScheduleGeneratorSheet = ({ ctx, onClose }) => {
+            const [start, setStart] = useState(() => { const d = new Date(); d.setHours(9, 0, 0, 0); return toLocalISO(d); });
+            const [block, setBlock] = useState(45);
+            const [buffer, setBuffer] = useState(15);
+
+            return (
+                <Sheet title="Auto-Scheduler" onClose={onClose}>
+                    <Section title="Rotation Settings" footer="Automatically routes groups through active course elements. Your Custom Events (like Lunch) will be safely preserved.">
+                        <FormRow label="Start Time">
+                            <input type="datetime-local" value={start} onChange={e => setStart(e.target.value)} className="text-[17px] text-right bg-transparent outline-none text-apple-blue w-full font-medium" />
+                        </FormRow>
+                        <div className="px-4 py-3.5 bg-apple-surface border-t border-white/5">
+                            <div className="flex justify-between text-[17px] text-gray-100 mb-2 font-medium"><span>Block Duration</span><span className="text-apple-blue">{block} min</span></div>
+                            <input type="range" min="15" max="120" step="5" value={block} onChange={e => setBlock(Number(e.target.value))} className="w-full" />
+                        </div>
+                        <div className="px-4 py-3.5 bg-apple-surface border-t border-white/5">
+                            <div className="flex justify-between text-[17px] text-gray-100 mb-2 font-medium"><span>Travel Buffer</span><span className="text-apple-blue">{buffer} min</span></div>
+                            <input type="range" min="0" max="30" step="5" value={buffer} onChange={e => setBuffer(Number(e.target.value))} className="w-full" />
+                        </div>
+                    </Section>
+                    <button onClick={() => { ctx.generateSchedule(new Date(start).toISOString(), block, buffer, ctx.elements, ctx.groups, ctx.sessions); onClose(); }} className="w-full py-3.5 bg-apple-blue text-white text-[17px] font-semibold rounded-xl shadow-[0_4px_14px_rgba(10,132,255,0.4)] ios-active block transition-transform">
+                        Generate New Schedule
+                    </button>
+                </Sheet>
+            );
+        };
+
+        const EditSessionSheet = ({ session, ctx, onClose, onSave, onDelete }) => {
+            const [s, setS] = useState({...session});
+            const isCustom = s.isCustom;
+            
+            const isValid = isCustom ? (s.customTitle && s.customTitle.trim() !== '') : (s.elementId && s.groupId);
+
+            return (
+                <Sheet title={s.isNew ? "New Block" : "Edit Block"} onClose={onClose} onSave={() => onSave(s)} saveDisabled={!isValid} isDestructive={!s.isNew} destructiveText="Delete Block" onDestructive={() => onDelete(s.id)}>
+                    
+                    {/* Activity / Custom Segment Toggle */}
+                    <div className="px-4 py-4 bg-apple-surface flex justify-center border border-white/5 rounded-xl shadow-md mb-8">
+                        <div className="flex bg-[#2C2C2E] p-1 rounded-lg w-full max-w-[300px]">
+                            <button type="button" onClick={() => setS({...s, isCustom: false})} className={`flex-1 py-1.5 rounded-md text-[13px] font-semibold transition-all ${!isCustom ? 'bg-[#3A3A3C] shadow-sm text-white' : 'text-gray-400'}`}>Activity Block</button>
+                            <button type="button" onClick={() => setS({...s, isCustom: true, customTitle: s.customTitle || 'Lunch Break'})} className={`flex-1 py-1.5 rounded-md text-[13px] font-semibold transition-all ${isCustom ? 'bg-[#3A3A3C] shadow-sm text-white' : 'text-gray-400'}`}>Custom Event</button>
+                        </div>
+                    </div>
+
+                    {isCustom ? (
+                        <Section title="Custom Details" footer="Custom events are not erased when you run the Auto-Scheduler.">
+                            <FormRow label="Event Title">
+                                <input type="text" placeholder="e.g. Lunch Break" value={s.customTitle || ''} onChange={e => setS({...s, customTitle: e.target.value})} className="text-[17px] text-right bg-transparent outline-none w-full text-white font-medium placeholder-gray-600" />
+                            </FormRow>
+                            <FormRow label="Assign To">
+                                <select value={s.groupId || ''} onChange={e => setS({...s, groupId: e.target.value})} className="text-[17px] text-apple-mint bg-transparent outline-none text-right dir-rtl w-full font-medium appearance-none">
+                                    <option value="" className="bg-[#1C1C1E] text-white">All Groups / Facility Wide</option>
+                                    {ctx.groups.map(g => <option key={g.id} value={g.id} className="bg-[#1C1C1E] text-white">Group: {g.name}</option>)}
+                                </select>
+                            </FormRow>
+                        </Section>
+                    ) : (
+                        <Section title="Assignment">
+                            {ctx.groups.length === 0 || ctx.elements.length === 0 ? <div className="text-apple-red p-4 text-center font-medium">Please add Groups and Stations first.</div> : (
+                                <>
+                                    <FormRow label="Visitor Group">
+                                        <select value={s.groupId || ""} onChange={e => setS({...s, groupId: e.target.value})} className="text-[17px] text-apple-blue bg-transparent outline-none text-right dir-rtl w-full font-medium appearance-none">
+                                            <option value="" disabled hidden className="bg-[#1C1C1E] text-gray-500">Select Group</option>
+                                            {ctx.groups.map(g => <option key={g.id} value={g.id} className="bg-[#1C1C1E] text-white">{g.name}</option>)}
+                                        </select>
+                                    </FormRow>
+                                    <FormRow label="Station">
+                                        <select value={s.elementId || ""} onChange={e => setS({...s, elementId: e.target.value})} className="text-[17px] text-apple-blue bg-transparent outline-none text-right dir-rtl w-full font-medium appearance-none max-w-[200px] truncate">
+                                            <option value="" disabled hidden className="bg-[#1C1C1E] text-gray-500">Select Station</option>
+                                            {ctx.elements.filter(e => e.includeInRotation !== false).map(e => <option key={e.id} value={e.id} className="bg-[#1C1C1E] text-white">{e.name}</option>)}
+                                        </select>
+                                    </FormRow>
+                                </>
+                            )}
+                        </Section>
+                    )}
+
+                    <Section title="Timing">
+                        <FormRow label="Start Time">
+                            <input type="datetime-local" value={toLocalISO(new Date(s.startTime))} onChange={e => setS({...s, startTime: new Date(e.target.value).toISOString()})} className="text-[17px] text-apple-blue bg-transparent outline-none text-right w-full font-medium" />
+                        </FormRow>
+                        <FormRow label="End Time">
+                            <input type="datetime-local" value={toLocalISO(new Date(s.endTime))} onChange={e => setS({...s, endTime: new Date(e.target.value).toISOString()})} className="text-[17px] text-apple-blue bg-transparent outline-none text-right w-full font-medium" />
+                        </FormRow>
+                    </Section>
+                </Sheet>
+            );
+        };
+
+        // MARK: - 3. Course Elements Tab
+        const ElementsView = ({ ctx }) => {
+            const [isMapMode, setIsMapMode] = useState(false);
+            const [editingEl, setEditingEl] = useState(null);
+
+            const saveElement = (e) => {
+                if (e.isNew) { delete e.isNew; ctx.setElements([...ctx.elements, e]); } 
+                else { ctx.setElements(ctx.elements.map(x => x.id === e.id ? e : x)); }
+                setEditingEl(null);
+            };
+
+            const deleteElement = (id) => {
+                ctx.setElements(ctx.elements.filter(x => x.id !== id));
+                ctx.setSessions(ctx.sessions.filter(s => s.elementId !== id));
+                ctx.setStaff(ctx.staff.map(s => s.assignedElementId === id ? { ...s, assignedElementId: null } : s));
+                setEditingEl(null);
+            };
+
+            const addNew = () => setEditingEl({ id: generateUUID(), name: "", capacity: 10, icon: "ph-flag-banner", colorHex: "Blue", mapX: 0.5, mapY: 0.5, includeInRotation: true, isNew: true });
+
+            return (
+                <div className="flex flex-col h-full space-y-4">
+                    
+                    <button onClick={addNew} className="w-full mb-2 py-3.5 bg-apple-blue/15 text-apple-blue font-semibold rounded-xl border border-apple-blue/20 flex items-center justify-center gap-2 ios-active hover:bg-apple-blue/25 transition-all">
+                        <i className="ph ph-plus font-bold text-lg"></i> Add Station
+                    </button>
+
+                    <div className="flex bg-[#1C1C1E] p-1 rounded-[10px] border border-white/5 self-center">
+                        <button onClick={() => setIsMapMode(false)} className={`px-6 py-1.5 rounded-[6px] text-[13px] font-semibold transition-all ${!isMapMode ? 'bg-[#3A3A3C] shadow-sm text-white' : 'text-gray-500 hover:text-gray-300'}`}>List View</button>
+                        <button onClick={() => setIsMapMode(true)} className={`px-6 py-1.5 rounded-[6px] text-[13px] font-semibold transition-all ${isMapMode ? 'bg-[#3A3A3C] shadow-sm text-white' : 'text-gray-500 hover:text-gray-300'}`}>Map View</button>
+                    </div>
+
+                    {isMapMode ? (
+                        <div className="flex-1 w-full min-h-[500px] bg-[#0A0A0A] relative rounded-xl overflow-hidden shadow-inner border border-white/5 mt-2">
+                            <InteractiveMap ctx={ctx} />
+                        </div>
+                    ) : (
+                        <Section>
+                            {ctx.elements.length === 0 ? <div className="p-6 text-[15px] text-gray-500 text-center font-medium">No stations exist yet.</div> :
+                            ctx.elements.map(el => (
+                                <ListRow key={el.id} onClick={() => setEditingEl({...el})} hasChevron={true}>
+                                    <div className="flex items-center gap-4 py-1.5 w-full pr-2">
+                                        <i className={`${getIconClass(el.icon)} ph-fill ${getColorClass(el.colorHex)} text-[30px] w-8 text-center drop-shadow-md ${el.includeInRotation === false ? 'opacity-50' : ''}`}></i>
+                                        <div className="flex-1 truncate">
+                                            <div className="flex items-center gap-2">
+                                                <h4 className="font-medium text-[17px] text-white tracking-tight">{el.name}</h4>
+                                                {el.includeInRotation === false && <span className="text-[9px] font-bold uppercase tracking-wider bg-white/10 text-gray-300 px-1.5 py-0.5 rounded-md border border-white/5">Staff Area</span>}
+                                            </div>
+                                            {el.includeInRotation !== false ? 
+                                                <p className="text-[13px] text-gray-400 mt-0.5">Capacity: <span className="text-gray-300">{el.capacity}</span></p> :
+                                                <p className="text-[13px] text-gray-500 mt-0.5">Non-Rotational Location</p>
+                                            }
+                                        </div>
+                                    </div>
+                                </ListRow>
+                            ))}
+                        </Section>
+                    )}
+
+                    {editingEl && <EditElementSheet el={editingEl} onClose={() => setEditingEl(null)} onSave={saveElement} onDelete={deleteElement} />}
+                </div>
+            );
+        };
+
+        const InteractiveMap = ({ ctx }) => {
+            const mapRef = useRef(null);
+            const [draggingId, setDraggingId] = useState(null);
+
+            const handlePointerMove = (e) => {
+                if (!draggingId || !mapRef.current) return;
+                const rect = mapRef.current.getBoundingClientRect();
+                const x = Math.max(0.05, Math.min(0.95, (e.clientX - rect.left) / rect.width));
+                const y = Math.max(0.05, Math.min(0.95, (e.clientY - rect.top) / rect.height));
+                ctx.setElements(ctx.elements.map(el => el.id === draggingId ? { ...el, mapX: x, mapY: y } : el));
+            };
+            const endDrag = () => setDraggingId(null);
+            
+            const rotationEls = ctx.elements.filter(e => e.includeInRotation !== false);
+
+            return (
+                <div ref={mapRef} className="absolute inset-0 w-full h-full touch-none select-none bg-[#050505] map-grid" onPointerMove={handlePointerMove} onPointerUp={endDrag} onPointerLeave={endDrag} onPointerCancel={endDrag}>
+                    
+                    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full pointer-events-none z-0">
+                        {rotationEls.length > 1 && <polyline points={rotationEls.map(el => `${el.mapX * 100},${el.mapY * 100}`).join(' ')} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="0.5" strokeDasharray="1.5 1.5" vectorEffect="non-scaling-stroke" />}
+                    </svg>
+
+                    {ctx.elements.map(el => (
+                        <div key={el.id} onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); setDraggingId(el.id); }} className="absolute flex flex-col items-center justify-center transform -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing" style={{ left: `${el.mapX * 100}%`, top: `${el.mapY * 100}%`, zIndex: draggingId === el.id ? 20 : 10 }}>
+                            <div className={`w-14 h-14 backdrop-blur-md rounded-full shadow-[0_8px_20px_rgba(0,0,0,0.8)] border flex items-center justify-center transition-all duration-150 ${el.includeInRotation !== false ? 'bg-[#1C1C1E]/95 border-white/10' : 'bg-[#2C2C2E]/90 border-dashed border-gray-600'} ${draggingId === el.id ? 'scale-110 border-apple-blue shadow-[0_0_20px_rgba(10,132,255,0.3)]' : ''}`}>
+                                <i className={`${getIconClass(el.icon)} ph-fill ${getColorClass(el.colorHex)} text-[26px] drop-shadow-md ${el.includeInRotation === false ? 'opacity-60' : ''}`}></i>
+                            </div>
+                            <span className={`mt-2 px-3 py-1 bg-black/80 backdrop-blur-md border border-white/10 text-[11px] font-bold tracking-wide rounded-lg shadow-lg whitespace-nowrap pointer-events-none ${el.includeInRotation !== false ? 'text-gray-200' : 'text-gray-500 italic'}`}>{el.name}</span>
+                        </div>
+                    ))}
+                    
+                    <div className="absolute bottom-6 left-0 right-0 text-center pointer-events-none z-0 px-4">
+                        <span className="bg-[#1C1C1E]/90 border border-white/5 backdrop-blur-xl px-5 py-2.5 rounded-full text-[13px] font-medium text-gray-300 shadow-2xl inline-block tracking-wide">Drag to map out your site</span>
+                    </div>
+                </div>
+            );
+        };
+
+        const EditElementSheet = ({ el, onClose, onSave, onDelete }) => {
+            const [e, setE] = useState({ includeInRotation: true, ...el });
+
+            return (
+                <Sheet title={e.isNew ? "New Station" : "Edit Station"} onClose={onClose} onSave={() => onSave(e)} saveDisabled={!e.name} isDestructive={!e.isNew} destructiveText="Delete Station" onDestructive={() => onDelete(e.id)}>
+                    <Section title="Station Info">
+                        <FormRow label="Name">
+                            <input type="text" placeholder="Required" value={e.name} onChange={ev => setE({...e, name: ev.target.value})} className="text-[17px] text-right bg-transparent outline-none w-full text-white font-medium placeholder-gray-600" />
+                        </FormRow>
+                        
+                        <Toggle 
+                            label="Auto-Rotation" 
+                            checked={e.includeInRotation !== false} 
+                            onChange={v => setE({...e, includeInRotation: v})} 
+                            description="Turn off for Staff-Only areas like Front Desk, Lunch Pavilion, or Maintenance."
+                        />
+
+                        {e.includeInRotation !== false && (
+                            <div className="px-4 py-3.5 bg-apple-surface border-t border-white/5">
+                                <div className="flex justify-between text-[17px] text-gray-100 mb-2 font-medium"><span>Capacity</span><span className="text-apple-blue">{e.capacity}</span></div>
+                                <input type="range" min="1" max="100" value={e.capacity} onChange={ev => setE({...e, capacity: Number(ev.target.value)})} className="w-full" />
+                            </div>
+                        )}
+                    </Section>
+
+                    <Section title="Appearance">
+                        <div className="p-4 bg-apple-surface">
+                            <label className="text-[13px] font-medium text-gray-400 uppercase tracking-wide mb-3 block">Icon</label>
+                            <div className="grid grid-cols-6 gap-2">
+                                {AVAILABLE_ICONS.map(i => (
+                                    <button key={i.id} onClick={() => setE({...e, icon: i.id})} className={`aspect-square rounded-[12px] flex items-center justify-center text-[22px] transition-all ${e.icon === i.id ? 'bg-apple-blue/20 text-apple-blue border border-apple-blue/50 shadow-[0_0_15px_rgba(10,132,255,0.15)]' : 'bg-[#2C2C2E] text-gray-500 border border-transparent hover:bg-[#3A3A3C]'}`}>
+                                        <i className={`${i.icon} ph-fill`}></i>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="p-4 bg-apple-surface border-t border-white/5">
+                            <label className="text-[13px] font-medium text-gray-400 uppercase tracking-wide mb-3 block">Color</label>
+                            <div className="flex gap-4 overflow-x-auto pb-2 hide-scrollbar px-1">
+                                {AVAILABLE_COLORS.map(c => (
+                                    <button key={c.name} onClick={() => setE({...e, colorHex: c.name})} className={`w-10 h-10 rounded-full flex-shrink-0 transition-transform ${c.bg} shadow-lg ${e.colorHex === c.name ? 'ring-[3px] ring-offset-[3px] ring-offset-apple-surface ring-gray-300 scale-110' : 'border border-black/50 opacity-80 hover:opacity-100'}`}></button>
+                                ))}
+                            </div>
+                        </div>
+                    </Section>
+                </Sheet>
+            );
+        };
+
+        // MARK: - 4. Staff Tab
+        const StaffView = ({ ctx }) => {
+            const [editingStaff, setEditingStaff] = useState(null);
+
+            const saveStaff = (s) => {
+                if (s.isNew) { delete s.isNew; ctx.setStaff([...ctx.staff, s]); } 
+                else { ctx.setStaff(ctx.staff.map(x => x.id === s.id ? s : x)); }
+                setEditingStaff(null);
+            };
+
+            const addNew = () => setEditingStaff({ id: generateUUID(), name: "", role: "Guide", assignedElementId: "", isNew: true });
+
+            return (
+                <div className="space-y-4">
+                    <button onClick={addNew} className="w-full mb-2 py-3.5 bg-apple-blue/15 text-apple-blue font-semibold rounded-xl border border-apple-blue/20 flex items-center justify-center gap-2 ios-active hover:bg-apple-blue/25 transition-all">
+                        <i className="ph ph-plus font-bold text-lg"></i> Add Employee
+                    </button>
+
+                    <Section>
+                        {ctx.staff.length === 0 ? <div className="p-6 text-[15px] text-gray-500 text-center font-medium">No employees listed.</div> :
+                        ctx.staff.map(person => {
+                            const el = ctx.elements.find(e => e.id === person.assignedElementId);
+                            return (
+                                <ListRow key={person.id} onClick={() => setEditingStaff({...person})} hasChevron={true}>
+                                    <div className="py-1">
+                                        <h4 className="font-medium text-[17px] text-white tracking-tight">{person.name}</h4>
+                                        <p className="text-[13px] text-gray-400 mt-0.5">{person.role}</p>
+                                    </div>
+                                    <div>
+                                        {el ? <span className="text-[12px] font-medium text-gray-300 bg-[#2C2C2E] px-3 py-1.5 rounded-full border border-white/5">{el.name}</span> 
+                                            : <span className="text-[12px] font-semibold text-apple-red bg-apple-red/10 px-3 py-1.5 rounded-full border border-apple-red/20 tracking-wide">Floating</span>}
+                                    </div>
+                                </ListRow>
+                            );
+                        })}
+                    </Section>
+
+                    {editingStaff && <EditStaffSheet staff={editingStaff} ctx={ctx} onClose={() => setEditingStaff(null)} onSave={saveStaff} onDelete={(id) => { ctx.setStaff(ctx.staff.filter(x => x.id !== id)); setEditingStaff(null); }} />}
+                </div>
+            );
+        };
+
+        const EditStaffSheet = ({ staff, ctx, onClose, onSave, onDelete }) => {
+            const [s, setS] = useState({...staff});
+
+            return (
+                <Sheet title={s.isNew ? "New Employee" : "Edit Employee"} onClose={onClose} onSave={() => onSave({...s, assignedElementId: s.assignedElementId || null})} saveDisabled={!s.name} isDestructive={!s.isNew} destructiveText="Delete Employee" onDestructive={() => onDelete(s.id)}>
+                    <Section title="Details">
+                        <FormRow label="Full Name">
+                            <input type="text" placeholder="Required" value={s.name} onChange={e => setS({...s, name: e.target.value})} className="text-[17px] text-right bg-transparent outline-none w-full text-white font-medium placeholder-gray-600" />
+                        </FormRow>
+                        <FormRow label="Role">
+                            <select value={s.role} onChange={e => setS({...s, role: e.target.value})} className="text-[17px] text-apple-blue font-medium bg-transparent outline-none text-right dir-rtl w-full appearance-none">
+                                {STAFF_ROLES.map(r => <option key={r} value={r} className="bg-[#1C1C1E] text-white">{r}</option>)}
+                            </select>
+                        </FormRow>
+                    </Section>
+                    <Section title="Daily Assignment" footer="You can assign staff to active course elements or static utility roles.">
+                        <FormRow label="Station / Task">
+                            <select value={s.assignedElementId || ""} onChange={e => setS({...s, assignedElementId: e.target.value})} className="text-[17px] text-apple-blue font-medium bg-transparent outline-none text-right dir-rtl w-full appearance-none max-w-[200px] truncate">
+                                <option value="" className="bg-[#1C1C1E] text-white">Floating / None</option>
+                                <optgroup label="Group Rotations" className="bg-[#1C1C1E] text-gray-500">
+                                    {ctx.elements.filter(e => e.includeInRotation !== false).map(e => <option key={e.id} value={e.id} className="text-white">{e.name}</option>)}
+                                </optgroup>
+                                <optgroup label="Staff-Only Areas" className="bg-[#1C1C1E] text-gray-500">
+                                    {ctx.elements.filter(e => e.includeInRotation === false).map(e => <option key={e.id} value={e.id} className="text-white">{e.name}</option>)}
+                                </optgroup>
+                            </select>
+                        </FormRow>
+                    </Section>
+                </Sheet>
+            );
+        };
+
+        // MARK: - 5. Groups Tab
+        const GroupsView = ({ ctx }) => {
+            const [editingGroup, setEditingGroup] = useState(null);
+
+            const saveGroup = (g) => {
+                if (g.isNew) { delete g.isNew; ctx.setGroups([...ctx.groups, g]); } 
+                else { ctx.setGroups(ctx.groups.map(x => x.id === g.id ? g : x)); }
+                setEditingGroup(null);
+            };
+
+            const addNew = () => setEditingGroup({ id: generateUUID(), name: "", type: "School", size: 10, isNew: true });
+
+            return (
+                <div className="space-y-4">
+                    <button onClick={addNew} className="w-full mb-2 py-3.5 bg-apple-blue/15 text-apple-blue font-semibold rounded-xl border border-apple-blue/20 flex items-center justify-center gap-2 ios-active hover:bg-apple-blue/25 transition-all">
+                        <i className="ph ph-plus font-bold text-lg"></i> Add Visitor Group
+                    </button>
+
+                    <Section>
+                        {ctx.groups.length === 0 ? <div className="p-6 text-[15px] text-gray-500 text-center font-medium">No visitor groups yet.</div> :
+                        ctx.groups.map(g => (
+                            <ListRow key={g.id} onClick={() => setEditingGroup({...g})} hasChevron={true}>
+                                <div className="py-1">
+                                    <h4 className="font-medium text-[17px] text-white tracking-tight">{g.name}</h4>
+                                    <p className="text-[13px] text-gray-400 mt-0.5">{g.type}</p>
+                                </div>
+                                <div className="text-[14px] font-medium text-white bg-[#2C2C2E] px-3 py-1 rounded-full border border-white/5">{g.size} ppl</div>
+                            </ListRow>
+                        ))}
+                    </Section>
+
+                    {editingGroup && <EditGroupSheet group={editingGroup} ctx={ctx} onClose={() => setEditingGroup(null)} onSave={saveGroup} onDelete={(id) => { ctx.setGroups(ctx.groups.filter(x => x.id !== id)); ctx.setSessions(ctx.sessions.filter(s => s.groupId !== id)); setEditingGroup(null); }} />}
+                </div>
+            );
+        };
+
+        const EditGroupSheet = ({ group, ctx, onClose, onSave, onDelete }) => {
+            const [g, setG] = useState({...group});
+
+            return (
+                <Sheet title={g.isNew ? "New Group" : "Edit Group"} onClose={onClose} onSave={() => onSave(g)} saveDisabled={!g.name} isDestructive={!g.isNew} destructiveText="Delete Group" onDestructive={() => onDelete(g.id)}>
+                    <Section title="Group Info">
+                        <FormRow label="Group Name">
+                            <input type="text" placeholder="Required" value={g.name} onChange={e => setG({...g, name: e.target.value})} className="text-[17px] text-white text-right bg-transparent outline-none w-full font-medium placeholder-gray-600" />
+                        </FormRow>
+                        <FormRow label="Type">
+                            <select value={g.type} onChange={e => setG({...g, type: e.target.value})} className="text-[17px] text-apple-blue font-medium bg-transparent outline-none text-right dir-rtl w-full appearance-none">
+                                {GROUP_TYPES.map(t => <option key={t} value={t} className="bg-[#1C1C1E] text-white">{t}</option>)}
+                            </select>
+                        </FormRow>
+                        <div className="px-4 py-3.5 bg-apple-surface border-t border-white/5">
+                            <div className="flex justify-between text-[17px] text-gray-100 mb-2 font-medium"><span>Size</span><span className="text-apple-blue">{g.size}</span></div>
+                            <input type="range" min="1" max="200" value={g.size} onChange={e => setG({...g, size: Number(e.target.value)})} className="w-full" />
+                        </div>
+                    </Section>
+                </Sheet>
+            );
+        };
+
+        // Boot React
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
